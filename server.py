@@ -1,6 +1,8 @@
 from flask import Flask, request, render_template_string
 import pickle
 import os
+import requests
+import base64
 
 app = Flask(__name__)
 PICKLE_FILE = "webhook_data.pkl"
@@ -66,6 +68,43 @@ def delete_webhook_text():
         pickle.dump(new_data, f)
     
     return message, 200
+
+@app.route("/webhook", methods=["PUT"])
+def generate_image():
+    """
+    Expects a JSON payload with:
+    {
+      "account_id": "EXAMPLEID",
+      "model": "EXAMPLEMODEL",
+      "api_key": "EXAMPLEKEY",
+      "prompt": "EXAMPLEPROMPT"
+    }
+    """
+    data = request.get_json(force=True)
+    account_id = data.get("account_id")
+    model = data.get("model")
+    api_key = data.get("api_key")
+    prompt = data.get("prompt")
+
+    if not all([account_id, model, api_key, prompt]):
+        return "Missing required fields", 400
+
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {"prompt": prompt}
+
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+    except Exception as e:
+        return f"Error generating image: {str(e)}", 500
+
+    # Encode the response content (the image) in base64 and return it
+    b64_img = base64.b64encode(response.content).decode('utf-8')
+    return b64_img, 200
 
 # Simple web interface that runs on old phones, minimalist & dark mode
 @app.route("/")
@@ -164,3 +203,4 @@ def index():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
