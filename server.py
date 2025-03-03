@@ -1,13 +1,11 @@
-from flask import Flask, request
+from flask import Flask, request, render_template_string
 import pickle
 import os
 
 app = Flask(__name__)
 PICKLE_FILE = "webhook_data.pkl"
 
-
 def safe_str(item):
-    # If the item is bytes, try to decode it, else convert to string.
     if isinstance(item, bytes):
         try:
             return item.decode('utf-8')
@@ -15,11 +13,9 @@ def safe_str(item):
             return str(item)
     return str(item)
 
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.data  # Get raw text payload from POST request
-    # Load existing data if file exists, else start with an empty list
+    data = request.data
     if os.path.exists(PICKLE_FILE):
         with open(PICKLE_FILE, "rb") as f:
             existing_data = pickle.load(f)
@@ -28,16 +24,13 @@ def webhook():
     else:
         existing_data = []
 
-    # Decode the incoming data and append it
     decoded_data = data.decode('utf-8')
     existing_data.append(decoded_data)
-
-    # Save back to the file
+    
     with open(PICKLE_FILE, "wb") as f:
         pickle.dump(existing_data, f)
-
+    
     return "Data saved successfully", 200
-
 
 @app.route("/webhook", methods=["GET"])
 def get_webhook_data():
@@ -45,44 +38,129 @@ def get_webhook_data():
         return "No data available", 404
     with open(PICKLE_FILE, "rb") as f:
         data = pickle.load(f)
-    # Convert every entry to a safe string before joining
     return "\n".join(safe_str(item) for item in data), 200
-
 
 @app.route("/webhook", methods=["DELETE"])
 def delete_webhook_text():
     if not os.path.exists(PICKLE_FILE):
         return "No data available", 404
 
-    # Get the text to delete from request body (as a decoded string)
     delete_text = request.data.decode('utf-8')
-
-    # Load existing data
+    
     with open(PICKLE_FILE, "rb") as f:
         data = pickle.load(f)
-
-    # Ensure data is a list
+    
     if not isinstance(data, list):
         data = [data]
 
-
-    # If no delete text provided (empty or only whitespace), clear alldata
     if not delete_text.strip():
         new_data = []
         message = "All data cleared"
     else:
-        # Otherwise, filter out entries that match the delete_text exactly
-        new_data = [entry for entry in data if safe_str(entry) !=
-                    delete_text]
+        new_data = [entry for entry in data if safe_str(entry) != delete_text]
         if len(new_data) == len(data):
             return "Text not found", 404
         message = f"Deleted occurrences of '{delete_text}'"
 
-    # Save the updated data back
     with open(PICKLE_FILE, "wb") as f:
         pickle.dump(new_data, f)
-
+    
     return message, 200
+
+# Simple web interface that runs on old phones, minimalist & dark mode
+@app.route("/")
+def index():
+    html = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Webhook Interface</title>
+      <style>
+        body {
+          background-color: #121212;
+          color: #e0e0e0;
+          font-family: Arial, sans-serif;
+          margin: 0;
+          padding: 20px;
+        }
+        h1 { text-align: center; }
+        .container {
+          max-width: 480px;
+          margin: auto;
+        }
+        label { display: block; margin-top: 15px; }
+        input[type="text"], textarea {
+          width: 100%;
+          padding: 10px;
+          border: none;
+          border-radius: 4px;
+          margin-top: 5px;
+          background-color: #1e1e1e;
+          color: #e0e0e0;
+        }
+        button {
+          margin-top: 10px;
+          padding: 10px;
+          width: 100%;
+          border: none;
+          border-radius: 4px;
+          background-color: #6200ea;
+          color: white;
+          font-size: 16px;
+        }
+        button:hover { background-color: #3700b3; }
+        .result { margin-top: 20px; white-space: pre-wrap; background-color: #1e1e1e; padding: 10px; border-radius: 4px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>Webhook Interface</h1>
+        <form id="postForm">
+          <label for="postData">Enter text to add:</label>
+          <input type="text" id="postData" required>
+          <button type="submit">Submit (POST)</button>
+        </form>
+        <form id="deleteForm">
+          <label for="deleteData">Enter text to delete (leave blank to clear all):</label>
+          <input type="text" id="deleteData">
+          <button type="submit">Delete (DELETE)</button>
+        </form>
+        <button id="refreshButton">Refresh Data (GET)</button>
+        <div class="result" id="resultArea">Data will appear here...</div>
+      </div>
+      <script>
+        const resultArea = document.getElementById('resultArea');
+        
+        document.getElementById('postForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const text = document.getElementById('postData').value;
+          const response = await fetch('/webhook', { method: 'POST', body: text });
+          const resText = await response.text();
+          resultArea.textContent = resText;
+          document.getElementById('postData').value = '';
+        });
+        
+        document.getElementById('deleteForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const text = document.getElementById('deleteData').value;
+          const response = await fetch('/webhook', { method: 'DELETE', body: text });
+          const resText = await response.text();
+          resultArea.textContent = resText;
+          document.getElementById('deleteData').value = '';
+        });
+        
+        document.getElementById('refreshButton').addEventListener('click', async () => {
+          const response = await fetch('/webhook');
+          const resText = await response.text();
+          resultArea.textContent = resText;
+        });
+      </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
